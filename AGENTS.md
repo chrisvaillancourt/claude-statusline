@@ -1,125 +1,145 @@
-# Agent instructions
-
+# Agent Instructions
 
 This file provides guidance to coding assistants when working with code in this repository.
 
+## Project Goal
+
+**Accurate context usage reporting.** This tool exists to show the true context window consumption in Claude Code, including all system overhead that the default statusline data doesn't include.
+
+The primary design principle is **accuracy over performance**. Any change that might compromise accuracy of the context reporting should be carefully considered.
+
 ## What This Project Does
 
-This is a custom status line configuration for Claude Code that displays contextual session information including current directory, git status, model name, and context window usage. The status line is implemented as a bash script that receives JSON input from Claude Code via stdin and outputs a formatted status line with ANSI colors.
+This is a custom status line for Claude Code that parses the session transcript to report accurate context usage. Unlike the default stdin JSON data (which only reports conversation tokens), this tool reads the API usage data from the transcript to include:
+
+- System prompts
+- Tool definitions
+- MCP tools
+- Memory files
+- Conversation messages
 
 Example output:
 ```
-~/dev/project | git:main✓ | Claude Sonnet 4.5 | ctx:22.5K/200K (11.3%) | ↑5.2K ↓17.3K
+~/dev/project | git:main✓ | Sonnet 4.5 | ctx:83.8K/200K (41.9%) [sys:45.4K conv:38.3K]
 ```
 
-## Testing the Status Line Script
+## Key Architecture
 
-To test the status line script with mock data:
+### Python Script with uv
+
+The main implementation is `statusline.py`, a Python script that uses uv for execution:
+
+```python
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+```
+
+### Two Data Sources
+
+| Source | What It Provides | Used For |
+|--------|------------------|----------|
+| stdin JSON | Session info, conversation tokens, transcript path | Model name, directory, fallback tokens |
+| Transcript JSONL | API usage data per message | **Accurate context totals** |
+
+### Transcript Parsing
+
+The script reads the entire transcript file to find the last assistant message with usage data:
+
+```python
+with open(transcript_path, "r") as f:
+    lines = f.readlines()
+
+for line in reversed(lines):
+    entry = json.loads(line)
+    if entry.get("message", {}).get("role") == "assistant":
+        usage = entry["message"]["usage"]
+        # Total context = input_tokens + cache_creation + cache_read
+```
+
+**Important:** The script reads the entire file to guarantee accuracy. See `PERFORMANCE.md` for alternative approaches if performance becomes a concern.
+
+### Context Calculation
+
+Total context = `input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`
+
+This represents everything sent to the API, including:
+- Uncached new tokens
+- Tokens written to cache
+- Tokens read from cache
+
+## Testing
 
 ```bash
+# Test with real transcript
 echo '{
   "model": {"display_name": "Test Model"},
   "workspace": {"current_dir": "/test/path"},
+  "transcript_path": "'$HOME'/.claude/projects/.../session.jsonl",
   "context_window": {
     "total_input_tokens": 5000,
     "total_output_tokens": 15000,
     "context_window_size": 200000
   }
-}' | ./statusline.sh
+}' | ./statusline.py
+
+# Test fallback (no transcript)
+echo '{
+  "model": {"display_name": "Test Model"},
+  "workspace": {"current_dir": "/test/path"},
+  "transcript_path": "",
+  "context_window": {
+    "total_input_tokens": 5000,
+    "total_output_tokens": 15000,
+    "context_window_size": 200000
+  }
+}' | ./statusline.py
 ```
-
-To debug and capture the actual JSON being passed by Claude Code, you can temporarily modify the settings to log the input (see TROUBLESHOOTING.md for details).
-
-## Key Architecture Decisions
-
-### Bash Script Isolation for Multi-Session Safety
-
-The status line script uses strict isolation patterns to prevent cross-session variable contamination when multiple Claude Code sessions run simultaneously:
-
-1. **Explicit bash subprocess**: `/bin/bash -c` creates isolated execution environment
-2. **Strict error handling**: `set -euo pipefail` catches errors immediately
-3. **Readonly variables**: All variables declared `readonly` to prevent overwrites
-4. **Single input capture**: JSON input captured once as `readonly INPUT` and parsed multiple times
-5. **Uppercase variable names**: Reduces likelihood of conflicts with shell internals
-
-This pattern prevents issues like Session A (using Sonnet) showing "Opus 4.5" in the status line when Session B (using Opus) is running simultaneously.
-
-### JSON Input Structure
-
-Claude Code passes session information to the status line script via stdin as JSON. The structure includes:
-
-**Documented fields:**
-- `session_id`: Unique session identifier
-- `workspace.current_dir`: Current working directory
-- `model.display_name`: Human-readable model name (e.g., "Sonnet 4.5")
-- `model.id`: Full model identifier (e.g., "claude-sonnet-4-5-20250929")
-- `cost.*`: Session cost and usage metrics
-- `version`: Claude Code version
-
-**Undocumented but available fields:**
-- `context_window.total_input_tokens`: Input tokens used this session
-- `context_window.total_output_tokens`: Output tokens used this session
-- `context_window.context_window_size`: Maximum context window (typically 200000)
-- `exceeds_200k_tokens`: Boolean flag for exceeding 200K tokens
-
-See JSON_STRUCTURE.md for the complete reference based on actual testing with Claude Code v2.0.69.
-
-### ANSI Color Codes
-
-The script uses these ANSI escape sequences:
-- `\033[36m` - Cyan (directory path)
-- `\033[35m` - Magenta (model name)
-- `\033[33m` - Yellow (context usage)
-- `\033[32m` - Green (input/output tokens)
-- `\033[0m` - Reset
-
-Colors are applied via `printf` for maximum portability across shells.
-
-### Git Status Detection
-
-Git information is gathered by:
-1. Changing to the workspace directory (`cd "$CWD"`)
-2. Checking if it's a git repository (`git rev-parse --git-dir`)
-3. Getting current branch (`git --no-optional-locks branch --show-current`)
-4. Checking working tree status (`git --no-optional-locks diff-index --quiet HEAD`)
-
-The `--no-optional-locks` flag prevents git from updating index files, which is important for status line performance.
 
 ## Important Files
 
-- `statusline.sh` - Main status line script (executable)
-- `debug-statusline.sh` - Debug version that logs JSON input to file
-- `JSON_STRUCTURE.md` - Complete documented JSON structure from actual testing
-- `TROUBLESHOOTING.md` - Common issues and debugging techniques
-- `INSTALL.md` - Installation instructions for different setup methods
+| File | Purpose |
+|------|---------|
+| `statusline.py` | Main Python script - **the primary implementation** |
+| `statusline.sh` | Legacy bash script (conversation tokens only, kept for reference) |
+| `JSON_STRUCTURE.md` | Complete reference of JSON fields from stdin |
+| `PERFORMANCE.md` | Alternative file reading approaches with tradeoffs |
+| `TROUBLESHOOTING.md` | Common issues and debugging |
+
+## Design Decisions
+
+### Why Read Entire File?
+
+Accuracy. Reading only the tail of the file could miss the last assistant message if:
+- The message itself is very large
+- Many tool calls appear after the last assistant message
+
+Since accuracy is the primary goal, we read the entire file. See `PERFORMANCE.md` for alternatives.
+
+### Why Python Instead of Bash?
+
+- Better JSON parsing
+- Cleaner file handling
+- Easier to maintain and extend
+- uv provides dependency management without external packages
+
+### Why Accessible Colors?
+
+The color scheme uses cyan/yellow/magenta instead of green/yellow/red to be accessible for people with red-green color blindness (the most common type).
 
 ## Dependencies
 
-Required:
-- `bash` - Shell interpreter
-- `jq` - JSON processor for parsing Claude Code's JSON input
-- `awk` - Floating point calculations (percentage, K-formatted numbers)
+- Python 3.11+ (via uv)
+- git (optional, for git status)
 
-Optional:
-- `git` - For git status display (gracefully skipped if not in a git repo)
+No external Python packages - uses only standard library.
 
-## Known Issues and Gotchas
+## Known Limitations
 
-1. **Cross-session contamination**: Earlier versions using simple inline bash commands had issues with variable sharing between sessions. Fixed by using isolated subprocess pattern (see "Bash Script Isolation" above).
+1. **Context breakdown is approximate** - The "sys" vs "conv" split is calculated as `total_context - conversation_tokens`. Since conversation_tokens is cumulative and total_context is a snapshot, this is an approximation.
 
-2. **Undocumented fields**: The `context_window` object is not in the official Claude Code documentation but works reliably as of v2.0.69. Future versions may change this.
+2. **Update frequency** - Status line updates at most every 300ms. Don't expect real-time updates.
 
-3. **Status line update frequency**: Updates at most every 300ms when conversation messages update. Don't rely on real-time updates.
-
-4. **Field name discrepancy**: Official docs reference `cwd` field, but `workspace.current_dir` is the recommended field to use (both work, but workspace.current_dir is more consistent).
-
-## Development History Context
-
-This project was created through iterative development where we:
-1. Started with Claude Code's `/statusline` command
-2. Customized based on user preferences (directory, git, model, context usage)
-3. Discovered undocumented `context_window` fields through testing
-4. Debugged cross-session contamination issues
-5. Documented the actual JSON structure vs official docs
-
-See README.md "Development Journey" section for detailed chronology.
+3. **Transcript dependency** - Requires Claude Code to write transcript files. If transcript is unavailable, falls back to less-accurate stdin JSON data.

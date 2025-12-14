@@ -21,11 +21,6 @@ import subprocess
 import sys
 
 
-# How many bytes to read from the end of the transcript file
-# 50KB should be plenty to find the last assistant message
-TAIL_BYTES = 50 * 1024
-
-
 def get_git_info(cwd: str) -> str:
     """Get git branch and status for the given directory."""
     if not cwd:
@@ -75,8 +70,9 @@ def parse_transcript_for_usage(transcript_path: str) -> dict | None:
     """
     Parse the JSONL transcript file to find the last assistant message's usage stats.
 
-    Efficiently reads only the tail of the file to avoid loading large transcripts
-    entirely into memory.
+    Reads the entire file to guarantee accurate context reporting. While this uses
+    more memory for large transcripts, accuracy is the primary goal of this tool.
+    See PERFORMANCE.md for alternative approaches if performance becomes an issue.
 
     Returns dict with usage info, or None if parsing fails.
     """
@@ -84,15 +80,7 @@ def parse_transcript_for_usage(transcript_path: str) -> dict | None:
         return None
 
     try:
-        file_size = os.path.getsize(transcript_path)
-
         with open(transcript_path, "r") as f:
-            # Only read the last TAIL_BYTES of the file
-            if file_size > TAIL_BYTES:
-                f.seek(file_size - TAIL_BYTES)
-                # Skip partial first line after seeking
-                f.readline()
-
             lines = f.readlines()
 
         # Search backwards for the last assistant message with usage data
@@ -193,18 +181,22 @@ def main():
     # Build the status line
     # Colors:
     # - Cyan (36m) for directory
-    # - Magenta (35m) for model
-    # - Yellow (33m) for context usage
-    # - Green (32m) for conversation tokens
-    # - Red (31m) for high usage warning
+    # - Magenta (35m) for model and high usage warning
+    # - Yellow (33m) for medium usage warning
+    # - Cyan (36m) for healthy usage (also used for directory)
+    # - Dark gray (90m) for breakdown details
+    #
+    # Color scheme is accessible for color vision deficiency:
+    # - Cyan/Yellow/Magenta are distinguishable even with red-green color blindness
+    # - Avoids problematic red/green combinations
 
     # Color code the percentage based on usage level
     if usage_pct >= 80:
-        pct_color = "31"  # Red - danger zone
+        pct_color = "35"  # Magenta - danger zone
     elif usage_pct >= 60:
         pct_color = "33"  # Yellow - warning
     else:
-        pct_color = "32"  # Green - healthy
+        pct_color = "36"  # Cyan - healthy
 
     # Build context display
     if transcript_usage and system_overhead > 0:
