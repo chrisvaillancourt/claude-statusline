@@ -143,3 +143,8 @@ No external Python packages - uses only standard library.
 2. **Update frequency** - Status line updates at most every 300ms. Don't expect real-time updates.
 
 3. **Transcript dependency** - Requires Claude Code to write transcript files. If transcript is unavailable, falls back to less-accurate stdin JSON data.
+
+## Issue Tracking
+
+This project uses [beads](https://github.com/steveyegge/beads) (`bd` command). Run `bd onboard` on first session.
+**Session end:** Always run `bd sync && git push` before claiming done.
