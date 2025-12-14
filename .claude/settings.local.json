@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(/tmp/analyze_log.sh:*)"
-    ]
-  }
-}
