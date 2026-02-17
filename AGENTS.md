@@ -147,7 +147,7 @@ No external Python packages - uses only standard library.
 ## Issue Tracking
 
 This project uses [beads](https://github.com/steveyegge/beads) (`bd` command). Run `bd onboard` on first session.
-**Session end:** Always run `bd sync && git push` before claiming done.
+**Session end:** Always run `git push` before claiming done.
 
 ## Landing the Plane (Session Completion)
 
@@ -161,7 +161,6 @@ This project uses [beads](https://github.com/steveyegge/beads) (`bd` command). R
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
