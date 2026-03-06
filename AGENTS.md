@@ -144,9 +144,6 @@ No external Python packages - uses only standard library.
 
 3. **Transcript dependency** - Requires Claude Code to write transcript files. If transcript is unavailable, falls back to less-accurate stdin JSON data.
 
-## Issue Tracking
-
-This project uses [beads](https://github.com/steveyegge/beads) (`bd` command). Run `bd onboard` on first session.
 **Session end:** Always run `git push` before claiming done.
 
 ## Landing the Plane (Session Completion)

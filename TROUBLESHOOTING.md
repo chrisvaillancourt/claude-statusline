@@ -143,6 +143,49 @@ Common issues and solutions when working with Claude Code status lines.
    fi
    ```
 
+### Statusline Shows Much Lower Context Than `/context` Command
+
+**Symptoms**: Running `/context` at the start of a new session shows ~71k tokens, but statusline shows only ~3k tokens.
+
+**Root Cause**: Different measurement points and data sources.
+
+**What's happening**:
+
+1. **Before first assistant response**:
+   - `/context` shows ~71k: full context allocation including system overhead and autocompact buffer
+   - Statusline shows ~3k: fallback to conversation tokens only (from stdin JSON)
+   - **Why**: No assistant response in transcript yet, so statusline can't access accurate API usage data
+
+2. **After first assistant response**:
+   - `/context` shows ~71k: still includes 45k autocompact buffer (reserved space)
+   - Statusline shows ~35k: actual API usage (27k system + 8k conversation)
+   - **Why**: Statusline reads real API usage from transcript, excluding unused buffer space
+
+**Key differences**:
+
+| Tool | Source | Includes Buffer | Updates |
+|------|--------|----------------|---------|
+| `/context` | Claude Code internals | Yes (45k autocompact) | Always |
+| Statusline | Transcript API usage | No (actual usage only) | After assistant response |
+
+**This is expected behavior**:
+- Statusline prioritizes **accuracy** - shows actual tokens sent to API
+- `/context` shows **allocation** - includes reserved buffer space
+- Before first response, statusline falls back to less accurate stdin JSON data
+
+**Example**:
+```
+# Start of session, before assistant responds:
+/context → 71k tokens (system + buffer + conversation)
+statusline → ctx:3.0K/200K  (conversation only, fallback mode)
+
+# After assistant responds:
+/context → 71k tokens (still includes 45k buffer)
+statusline → ctx:34.7K/200K [sys:27.1K conv:7.6K]  (actual API usage)
+```
+
+**Solution**: This is working as designed. Wait for the first assistant response to see accurate statusline data.
+
 ### Git Information Not Showing
 
 **Symptoms**: Git branch and status don't appear even in a git repository.
